@@ -7,11 +7,12 @@ from jaxtyping import Float
 class SingleHeadAttention(nn.Module):
     def __init__(self, embedding_dim: int, attention_dim: int) -> None:
         super().__init__()
-        torch.manual_seed(0)
 
-        self.get_queries = nn.Linear(embedding_dim, attention_dim, bias=False)
-        self.get_keys = nn.Linear(embedding_dim, attention_dim, bias=False)
-        self.get_values = nn.Linear(embedding_dim, attention_dim, bias=False)
+        self.get_queries: nn.Linear = nn.Linear(
+            embedding_dim, attention_dim, bias=False
+        )
+        self.get_keys: nn.Linear = nn.Linear(embedding_dim, attention_dim, bias=False)
+        self.get_values: nn.Linear = nn.Linear(embedding_dim, attention_dim, bias=False)
 
     def forward(
         self, embedded: Float[Tensor, "batch_size context_length embedding_dim"]
