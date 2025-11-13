@@ -206,5 +206,15 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Dataset
+data/en-vi.txt/
+data/IWSLT'15 en-vi/
+notebooks/processed_data/
+notebooks/IWSLT-15-en-vi/
+
+# MLflow
+mlruns/
+
 # Temp Files
 scratch/
+notebooks/
