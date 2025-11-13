@@ -13,7 +13,7 @@ class Generator(nn.Module):
     and projects it onto the vocabulary space (B, T, vocab_size)
     to produce the logits.
 
-    (Best Practice: This layer's weights can be tied with the
+    (This layer's weights can be tied with the
     target embedding layer, which we will handle in the main
     'Transformer' model class).
     """
