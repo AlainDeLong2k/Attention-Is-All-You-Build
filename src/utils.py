@@ -4,32 +4,39 @@ from jaxtyping import Bool, Int
 
 
 def create_padding_mask(
-    input_tensor: Int[Tensor, "B T"], pad_token_id: int
-) -> Bool[Tensor, "B 1 1 T"]:
+    input_ids: Int[Tensor, "B T_k"], pad_token_id: int
+) -> Bool[Tensor, "B 1 1 T_k"]:
     """
-    Creates a causal (look-ahead) mask for the Decoder's self-attention.
+    Creates a padding mask for the attention mechanism.
 
-    This mask prevents positions from attending to subsequent positions.
-    It's a square matrix where the upper triangle (future) is False
-    and the lower triangle (past/present) is True.
+    This mask identifies positions holding the <PAD> token
+    and prepares a mask tensor that, when broadcasted, will mask
+    these positions in the attention scores matrix (B, H, T_q, T_k).
 
     Args:
-        seq_len (int): The sequence length (T_q).
-        device (torch.device): The device to create the tensor on (e.g., 'cuda').
+        input_ids (Tensor): The input token IDs. Shape (B, T_k).
+        pad_token_id (int): The ID of the padding token.
 
     Returns:
-        Tensor: A boolean mask of shape (1, 1, T_q, T_q).
-                'True' means "keep" (allowed to see).
-                'False' means "mask out" (future token).
+        Tensor: A boolean mask of shape (B, 1, 1, T_k).
+                'True' means "keep" (not a pad token).
+                'False' means "mask out" (is a pad token).
     """
 
-    mask: Tensor = input_tensor != pad_token_id
+    # 1. Create the base mask
+    # (input_ids != pad_token_id) will be True for real tokens, False for PAD
+    # Shape: (B, T_k)
+    mask: Tensor = input_ids != pad_token_id
 
-    # (B, T) -> (B, 1, 1, T) for broadcasting
+    # 2. Add dimensions for broadcasting
+    # We add a dimension for T_q (dim 1) and H (dim 2)
+    # Shape: (B, T_k) -> (B, 1, T_k) -> (B, 1, 1, T_k)
     return mask.unsqueeze(1).unsqueeze(2)
 
 
-def create_look_ahead_mask(seq_len: int) -> Bool[Tensor, "1 1 T T"]:
+def create_look_ahead_mask(
+    seq_len: int, device: torch.device
+) -> Bool[Tensor, "1 1 T_q T_q"]:
     """
     Creates a causal (look-ahead) mask for the Decoder's self-attention.
 
@@ -47,10 +54,20 @@ def create_look_ahead_mask(seq_len: int) -> Bool[Tensor, "1 1 T T"]:
                 'False' means "mask out" (future token).
     """
 
-    # (T, T)
-    lower_triangular: Tensor = torch.tril(
-        torch.ones(seq_len, seq_len, dtype=torch.bool)
-    )
+    # 1. Create a square matrix of ones.
+    # Shape: (T_q, T_q)
+    ones = torch.ones(seq_len, seq_len)
 
-    # (1, 1, T, T) for broadcasting
-    return lower_triangular.unsqueeze(0).unsqueeze(0)
+    # 2. Get the lower triangular part (bao gồm đường chéo)
+    # This sets the upper triangle (future) to 0 and keeps the rest 1.
+    # Shape: (T_q, T_q)
+    # Example (T_q=3):
+    # [[1., 0., 0.],
+    #  [1., 1., 0.],
+    #  [1., 1., 1.]]
+    lower_triangular: Tensor = torch.tril(ones)
+
+    # 3. Convert to boolean and add broadcasting dimensions
+    # Shape: (T_q, T_q) -> (1, 1, T_q, T_q)
+    # (mask == 1) converts 1. to True, 0. to False
+    return (lower_triangular == 1).unsqueeze(0).unsqueeze(0)
