@@ -1,6 +1,34 @@
 import torch
 from torch import Tensor
+from datasets import Dataset
 from jaxtyping import Bool, Int
+
+
+# --- Helper functions for cleaning ---
+def is_valid_pair(example: dict) -> bool:
+    """Check if both 'en' and 'vi' strings are non-empty."""
+    translation = example.get("translation", {})
+    en_text = translation.get("en", "").strip()
+    vi_text = translation.get("vi", "").strip()
+    return bool(en_text) and bool(vi_text)  # (Return True if both are valid)
+
+
+def filter_empty(dataset: Dataset, num_proc: int) -> Dataset:
+    """
+    Applies the validation filter to a dataset split using
+    parallel processing (via .map() or .filter()).
+    """
+    print(f"  Filtering empty strings from split...")
+    # (We use .filter() which is highly optimized)
+    original_len = len(dataset)
+
+    filtered_dataset = dataset.filter(
+        is_valid_pair, num_proc=num_proc  # (Use parallel processing from config)
+    )
+
+    new_len = len(filtered_dataset)
+    print(f"  Filtered {original_len - new_len} empty/invalid pairs.")
+    return filtered_dataset
 
 
 def create_padding_mask(

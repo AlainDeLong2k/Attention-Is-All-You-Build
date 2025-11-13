@@ -2,10 +2,10 @@ from pathlib import Path
 import torch
 
 # Path Configuration
-DATA_PATH = Path(r"data\IWSLT-15-en-vi")
+DATA_PATH = Path(r"..\data\IWSLT-15-en-vi")
 
 # TOKENIZER_NAME = ""
-TOKENIZER_NAME = "iwslt_en-vi_tokenizer_32k"
+TOKENIZER_NAME = "iwslt_en-vi_tokenizer_16k.json"
 TOKENIZER_PATH = Path(r"artifacts\tokenizers") / TOKENIZER_NAME
 
 # MODEL_NAME = ""
@@ -17,6 +17,10 @@ CACHE_DIR = ""
 
 # Hardware & Data Config
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+VOCAB_SIZE: int = 32_000
+
+SPECIAL_TOKENS: list[str] = ["[PAD]", "[UNK]", "[SOS]", "[EOS]"]
 
 NUM_WORKERS: int = 4
 
