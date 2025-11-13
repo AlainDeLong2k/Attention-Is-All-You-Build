@@ -37,7 +37,7 @@ N_LAYERS: int = 6  # (N=6 in paper)
 N_HEADS: int = 8  # (h=8 in paper)
 D_FF: int = 1024  # (d_ff = 4 * d_model = 1024)
 DROPOUT: float = 0.1  # (Dropout = 0.1 in paper)
-MAX_SEQ_LEN: int = 150  # (Max length for Positional Encoding)
+MAX_SEQ_LEN: int = 100  # (Max length for Positional Encoding)
 
 
 if __name__ == "__main__":

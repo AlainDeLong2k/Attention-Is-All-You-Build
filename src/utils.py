@@ -34,9 +34,7 @@ def create_padding_mask(
     return mask.unsqueeze(1).unsqueeze(2)
 
 
-def create_look_ahead_mask(
-    seq_len: int, device: torch.device
-) -> Bool[Tensor, "1 1 T_q T_q"]:
+def create_look_ahead_mask(seq_len: int) -> Bool[Tensor, "1 1 T_q T_q"]:
     """
     Creates a causal (look-ahead) mask for the Decoder's self-attention.
 
