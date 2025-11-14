@@ -14,10 +14,12 @@ from utils import is_valid_pair, filter_empty
 
 
 DATA_PATH = Path(r"..\data\IWSLT-15-en-vi")
+# TOKENIZER_NAME = "iwslt_en-vi_tokenizer_8k.json"
 TOKENIZER_NAME = "iwslt_en-vi_tokenizer_16k.json"
 TOKENIZER_SAVE_PATH = Path(r"..\artifacts\tokenizers") / TOKENIZER_NAME
 
-VOCAB_SIZE: int = 32_000
+VOCAB_SIZE: int = 16_000
+# VOCAB_SIZE: int = 32_000
 SPECIAL_TOKENS: list[str] = ["[PAD]", "[UNK]", "[SOS]", "[EOS]"]
 
 BATCH_SIZE_FOR_TOKENIZER: int = 10000
