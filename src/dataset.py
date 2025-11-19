@@ -169,6 +169,7 @@ def get_translation_datasets(
     train_data, val_data, test_data = utils.get_raw_data(
         config.DATA_PATH, num_workers=config.NUM_WORKERS
     )
+    train_data = train_data.select(range(config.NUM_SAMPLES_TO_USE))
 
     print(f"Building PyTorch Datasets...")
 
@@ -243,6 +244,7 @@ def get_dataloaders(
         num_workers=config.NUM_WORKERS,
         collate_fn=collator,
         pin_memory=True if config.DEVICE == "cuda" else False,  # (Optimization)
+        persistent_workers=True,
     )
 
     # 4. Create Validation DataLoader
@@ -254,6 +256,7 @@ def get_dataloaders(
         num_workers=config.NUM_WORKERS,
         collate_fn=collator,
         pin_memory=True if config.DEVICE == "cuda" else False,
+        persistent_workers=True,
     )
 
     # 5. Create Test DataLoader
