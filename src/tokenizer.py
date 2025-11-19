@@ -21,7 +21,7 @@ TOKENIZER_SAVE_PATH = Path(r"..\artifacts\tokenizers") / TOKENIZER_NAME
 VOCAB_SIZE: int = 32_000
 SPECIAL_TOKENS: list[str] = ["[PAD]", "[UNK]", "[SOS]", "[EOS]"]
 
-BATCH_SIZE_FOR_TOKENIZER: int = 100000
+BATCH_SIZE_FOR_TOKENIZER: int = 10000
 NUM_WORKERS: int = 8
 
 
@@ -56,7 +56,7 @@ def instantiate_tokenizer() -> Tokenizer:
     # 1. Initialize an empty Tokenizer with a BPE model
     tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
 
-    # 2. (Best Practice) Set up the normalizer and pre-tokenizer
+    # 2. Set up the normalizer and pre-tokenizer
     # Normalizer: Cleans the text (e.g., Unicode, lowercase)
     tokenizer.normalizer = normalizers.Sequence(
         [

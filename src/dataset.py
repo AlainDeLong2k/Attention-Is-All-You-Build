@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from datasets import Dataset as ArrowDataset
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 
-from config import SOS_TOKEN_ID, EOS_TOKEN_ID
-from utils import create_padding_mask, create_look_ahead_mask
+import config
+from src import utils
 
 
 class TranslationDataset(Dataset):
@@ -59,7 +59,9 @@ class TranslationDataset(Dataset):
         # Manually add SOS/EOS to target
         src_ids = src_encoding["input_ids"]
 
-        tgt_ids = [SOS_TOKEN_ID] + tgt_encoding["input_ids"] + [EOS_TOKEN_ID]
+        tgt_ids = (
+            [config.SOS_TOKEN_ID] + tgt_encoding["input_ids"] + [config.EOS_TOKEN_ID]
+        )
 
         return {"src_ids": src_ids, "tgt_ids": tgt_ids}
 
@@ -119,15 +121,17 @@ class DataCollator:
 
         # (Mask 1) Source padding mask (for Encoder MHA & Cross-Attn)
         # Shape: (B, 1, 1, T_src)
-        src_mask = create_padding_mask(src_ids_padded, self.pad_token_id)
+        src_mask = utils.create_padding_mask(src_ids_padded, self.pad_token_id)
 
         # (Mask 2) Target padding mask (for Decoder MHA)
         # Shape: (B, 1, 1, T_tgt)
-        tgt_padding_mask = create_padding_mask(dec_input_ids_padded, self.pad_token_id)
+        tgt_padding_mask = utils.create_padding_mask(
+            dec_input_ids_padded, self.pad_token_id
+        )
 
         # (Mask 3) Target look-ahead mask (for Decoder MHA)
         # Shape: (1, 1, T_tgt, T_tgt)
-        look_ahead_mask = create_look_ahead_mask(T_tgt)
+        look_ahead_mask = utils.create_look_ahead_mask(T_tgt)
 
         # (Mask 4) Combined target mask
         # Shape: (B, 1, T_tgt, T_tgt)
@@ -140,3 +144,130 @@ class DataCollator:
             "src_mask": src_mask,  # (B, 1, 1, T_src)
             "tgt_mask": tgt_mask,  # (B, 1, T_tgt, T_tgt)
         }
+
+
+def get_translation_datasets(
+    tokenizer: PreTrainedTokenizerFast,
+) -> tuple[TranslationDataset, TranslationDataset, TranslationDataset]:
+    """
+    A Factory function to automate the data pipeline setup.
+
+    It performs 3 steps:
+    1. Loads and cleans raw data (using src.utils).
+    2. Instantiates the TranslationDataset for Train, Val, and Test splits.
+    3. Returns the 3 PyTorch datasets ready for the DataLoader.
+
+    Args:
+        tokenizer: The trained tokenizer.
+
+    Returns:
+        Tuple containing (train_ds, val_ds, test_ds)
+    """
+
+    # 1. Load raw cleaned data (returns Dict[str, Dataset])
+    #    This keeps train.py clean from raw data handling logic.
+    train_data, val_data, test_data = utils.get_raw_data(
+        config.DATA_PATH, num_workers=config.NUM_WORKERS
+    )
+
+    print(f"Building PyTorch Datasets...")
+
+    # 2. Instantiate the Train Dataset
+    #    (Uses global config for max_length)
+    train_ds = TranslationDataset(
+        dataset=train_data,
+        tokenizer=tokenizer,
+        max_len_src=config.MAX_SEQ_LEN,
+        max_len_tgt=config.MAX_SEQ_LEN,
+    )
+
+    # 3. Instantiate the Validation Dataset
+    val_ds = TranslationDataset(
+        dataset=val_data,
+        tokenizer=tokenizer,
+        max_len_src=config.MAX_SEQ_LEN,
+        max_len_tgt=config.MAX_SEQ_LEN,
+    )
+
+    # 4. Instantiate the Test Dataset
+    test_ds = TranslationDataset(
+        dataset=test_data,
+        tokenizer=tokenizer,
+        max_len_src=config.MAX_SEQ_LEN,
+        max_len_tgt=config.MAX_SEQ_LEN,
+    )
+
+    print(
+        f"Datasets created: Train={len(train_ds)}, Val={len(val_ds)}, Test={len(test_ds)}"
+    )
+
+    return train_ds, val_ds, test_ds
+
+
+def get_dataloaders(
+    tokenizer: PreTrainedTokenizerFast,
+) -> tuple[DataLoader, DataLoader, DataLoader]:
+    """
+    A high-level Factory function to create DataLoaders.
+
+    This function abstracts away all the data pipeline complexity:
+    - Loading/Cleaning raw data
+    - Creating PyTorch Datasets
+    - Instantiating the DataCollator (dynamic padding)
+    - Creating DataLoaders with the correct batch size and workers
+
+    Args:
+        tokenizer: The trained tokenizer.
+
+    Returns:
+        Tuple containing (train_loader, val_loader, test_loader)
+    """
+
+    # 1. Create the Datasets (using the factory function we made earlier)
+    train_ds, val_ds, test_ds = get_translation_datasets(tokenizer)
+
+    # 2. Instantiate the Collator
+    # (We need config to get PAD_TOKEN_ID)
+    collator = DataCollator(pad_token_id=config.PAD_TOKEN_ID)
+
+    print(
+        f"Building DataLoaders (Batch Size: {config.BATCH_SIZE}, Workers: {config.NUM_WORKERS})..."
+    )
+
+    # 3. Create Train DataLoader
+    # (Shuffle = True is CRITICAL for training)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=config.BATCH_SIZE,
+        shuffle=True,
+        num_workers=config.NUM_WORKERS,
+        collate_fn=collator,
+        pin_memory=True if config.DEVICE == "cuda" else False,  # (Optimization)
+    )
+
+    # 4. Create Validation DataLoader
+    # (Shuffle = False for reproducible validation)
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=4 * config.BATCH_SIZE,
+        shuffle=False,
+        num_workers=config.NUM_WORKERS,
+        collate_fn=collator,
+        pin_memory=True if config.DEVICE == "cuda" else False,
+    )
+
+    # 5. Create Test DataLoader
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=4 * config.BATCH_SIZE,
+        shuffle=False,
+        num_workers=config.NUM_WORKERS,
+        collate_fn=collator,
+        pin_memory=True if config.DEVICE == "cuda" else False,
+    )
+
+    print(f"DataLoader (train) created with {len(train_loader)} batches.")
+    print(f"DataLoader (val) created with {len(val_loader)} batches.")
+    print(f"DataLoader (test) created with {len(test_loader)} batches.")
+
+    return train_loader, val_loader, test_loader
