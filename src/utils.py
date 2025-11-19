@@ -1,6 +1,7 @@
+from pathlib import Path
 import torch
 from torch import Tensor
-from datasets import Dataset
+from datasets import DatasetDict, Dataset, load_dataset
 from jaxtyping import Bool, Int
 
 
@@ -29,6 +30,38 @@ def filter_empty(dataset: Dataset, num_proc: int) -> Dataset:
     new_len = len(filtered_dataset)
     print(f"  Filtered {original_len - new_len} empty/invalid pairs.")
     return filtered_dataset
+
+
+# --- Dataset Loading & Splitting ---
+def get_raw_data(
+    dataset_path: str | Path, for_tokenizer: bool = False, num_workers: int = 8
+) -> Dataset | tuple[Dataset, Dataset, Dataset]:
+    """
+    Load and filter dataset splits from a given path.
+
+    Args:
+        dataset_path (str | Path): Path to the dataset directory or config.
+        for_tokenizer (bool): If True, return only filtered train split (for tokenizer training).
+                             If False, return tuple of (train, validation, test) splits (for model training/eval).
+        num_workers (int): Number of workers for parallel filtering.
+
+    Returns:
+        Dataset: Filtered train split (if for_tokenizer=True).
+        tuple(Dataset, Dataset, Dataset): Filtered train, validation, test splits (if for_tokenizer=False).
+    """
+    print(f"Loading datasets from: {dataset_path}")
+    all_splits: DatasetDict = load_dataset(path=str(dataset_path))
+    print(all_splits)
+
+    print("--- Filtering Datasets (Removing empty sentences) ---")
+    train_data: Dataset = filter_empty(all_splits["train"], num_workers)
+    val_data: Dataset = filter_empty(all_splits["validation"], num_workers)
+    test_data: Dataset = filter_empty(all_splits["test"], num_workers)
+
+    if for_tokenizer:
+        return train_data
+    else:
+        return train_data, val_data, test_data
 
 
 def create_padding_mask(

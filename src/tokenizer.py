@@ -1,6 +1,5 @@
 from pathlib import Path
-import datasets
-from datasets import Dataset, load_dataset
+from datasets import Dataset
 from tokenizers import (
     Tokenizer,
     models,
@@ -10,47 +9,20 @@ from tokenizers import (
     trainers,
 )
 from tqdm.auto import tqdm
-from utils import is_valid_pair, filter_empty
+from utils import get_raw_data
 
 
 DATA_PATH = Path(r"..\data\IWSLT-15-en-vi")
-# TOKENIZER_NAME = "iwslt_en-vi_tokenizer_8k.json"
-TOKENIZER_NAME = "iwslt_en-vi_tokenizer_16k.json"
+# TOKENIZER_NAME = "iwslt_en-vi_tokenizer_16k.json"
+TOKENIZER_NAME = "iwslt_en-vi_tokenizer_32k.json"
 TOKENIZER_SAVE_PATH = Path(r"..\artifacts\tokenizers") / TOKENIZER_NAME
 
-VOCAB_SIZE: int = 16_000
-# VOCAB_SIZE: int = 32_000
+# VOCAB_SIZE: int = 16_000
+VOCAB_SIZE: int = 32_000
 SPECIAL_TOKENS: list[str] = ["[PAD]", "[UNK]", "[SOS]", "[EOS]"]
 
-BATCH_SIZE_FOR_TOKENIZER: int = 10000
+BATCH_SIZE_FOR_TOKENIZER: int = 100000
 NUM_WORKERS: int = 8
-
-
-def get_raw_data() -> Dataset:
-    print("Loading datasets from local Parquet files...")
-    # 1. Load all 3 splits from the local Parquet files
-    all_splits: datasets.DatasetDict = load_dataset(path=str(DATA_PATH))
-
-    print(all_splits)
-
-    # 2. Assign to our standard variable names
-    # train_data_raw = all_splits["train"]
-    # val_data_raw = all_splits["validation"]
-    # test_data_raw = all_splits["test"]
-
-    # print(f"\nDatasets loaded successfully:")
-    # print(f"  Train samples: {len(train_data_raw)}")
-    # print(f"  Val samples: {len(val_data_raw)}")
-    # print(f"  Test samples: {len(test_data_raw)}")
-    # print("\nExample (from train split):")
-    # print(train_data_raw[0])
-    # print(val_data_raw[0])
-    # print(test_data_raw[0])
-
-    print("--- Filtering Datasets (Removing empty sentences) ---")
-    train_raw_data: Dataset = filter_empty(all_splits["train"], NUM_WORKERS)
-
-    return train_raw_data
 
 
 def get_training_corpus(dataset: Dataset, batch_size: int = 1000):
@@ -110,18 +82,19 @@ def train_tokenizer():
 
     print("Tokenizer Trainer initialized.")
 
-    train_raw_data = get_raw_data()
-    print(f"Starting tokenizer training on {len(train_raw_data)} pairs...")
+    train_dataset = get_raw_data(DATA_PATH, for_tokenizer=True)
+    if not isinstance(train_dataset, Dataset):
+        train_dataset = Dataset.from_list(train_dataset)
+    print(f"Starting tokenizer training on {len(train_dataset)} pairs...")
 
     # 1. Define the iterator AND batch size
-    BATCH_SIZE_FOR_TOKENIZER = 10000
     text_iterator = get_training_corpus(
-        train_raw_data,
+        train_dataset,
         batch_size=BATCH_SIZE_FOR_TOKENIZER,
     )
 
-    # 2. (Best Practice) Calculate total steps for the progress bar
-    total_steps = (len(train_raw_data) // BATCH_SIZE_FOR_TOKENIZER) * 2
+    # 2. Calculate total steps for the progress bar
+    total_steps = (len(train_dataset) // BATCH_SIZE_FOR_TOKENIZER) * 2
     if total_steps == 0:
         total_steps = 1  # (Avoid division by zero if dataset is tiny)
 
