@@ -2,7 +2,7 @@ from torch import Tensor
 import torch.nn as nn
 from typing import Callable
 from jaxtyping import Bool, Float
-from layers import MultiHeadAttention, PositionwiseFeedForward
+from src.layers import MultiHeadAttention, PositionwiseFeedForward
 
 
 class ResidualConnection(nn.Module):

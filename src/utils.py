@@ -1,8 +1,27 @@
 from pathlib import Path
+import random
+import numpy as np
+from datasets import DatasetDict, Dataset, load_dataset
 import torch
 from torch import Tensor
-from datasets import DatasetDict, Dataset, load_dataset
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from jaxtyping import Bool, Int
+
+
+# Utility function to set random seed for reproducibility
+def seed_everything(seed: int = 42) -> None:
+    """
+    Set random seed for Python, NumPy, and PyTorch to ensure reproducibility.
+    Args:
+        seed (int): The seed value to use.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 # --- Helper functions for cleaning ---
@@ -62,6 +81,27 @@ def get_raw_data(
         return train_data
     else:
         return train_data, val_data, test_data
+
+
+# Utility function to set random seed for reproducibility
+def load_tokenizer(tokenizer_path: str | Path) -> PreTrainedTokenizerFast:
+    """
+    Load a trained tokenizer from file and return tokenizer object and special token ids.
+    Args:
+        tokenizer_path (str | Path): Path to the tokenizer JSON file.
+        special_tokens (list[str], optional): List of special tokens to get ids for (e.g. ["[PAD]", "[SOS]", "[EOS]", "[UNK]"]).
+    Returns:
+        tokenizer (Tokenizer): Loaded tokenizer object.
+        token_ids (dict): Dictionary of special token ids.
+    """
+    print(f"Loading tokenizer from {tokenizer_path}...")
+    # tokenizer = Tokenizer.from_file(str(tokenizer_path))
+    tokenizer = PreTrainedTokenizerFast(tokenizer_file=str(tokenizer_path))
+    tokenizer.pad_token = "[PAD]"
+    tokenizer.unk_token = "[UNK]"
+    tokenizer.bos_token = "[SOS]"  # bos = Beginning Of Sentence
+    tokenizer.eos_token = "[EOS]"  # eos = End Of Sentence
+    return tokenizer
 
 
 def create_padding_mask(

@@ -1,8 +1,8 @@
 from torch import Tensor
 import torch.nn as nn
 from jaxtyping import Bool, Int, Float
-from embedding import InputEmbeddings, PositionalEncoding
-from modules import Encoder, Decoder
+from src.embedding import InputEmbeddings, PositionalEncoding
+from src.modules import Encoder, Decoder
 
 
 class Generator(nn.Module):

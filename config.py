@@ -2,10 +2,11 @@ from pathlib import Path
 import torch
 
 # Path Configuration
-DATA_PATH = Path(r"..\data\IWSLT-15-en-vi")
+DATA_PATH = Path(r"data\IWSLT-15-en-vi")
 
 # TOKENIZER_NAME = ""
-TOKENIZER_NAME = "iwslt_en-vi_tokenizer_16k.json"
+# TOKENIZER_NAME = "iwslt_en-vi_tokenizer_16k.json"
+TOKENIZER_NAME = "iwslt_en-vi_tokenizer_32k.json"
 TOKENIZER_PATH = Path(r"artifacts\tokenizers") / TOKENIZER_NAME
 
 # MODEL_NAME = ""
@@ -22,7 +23,7 @@ VOCAB_SIZE: int = 32_000
 
 SPECIAL_TOKENS: list[str] = ["[PAD]", "[UNK]", "[SOS]", "[EOS]"]
 
-NUM_WORKERS: int = 4
+NUM_WORKERS: int = 8
 
 NUM_SAMPLE_TO_USE: int = 1_000_000
 
@@ -31,6 +32,7 @@ BATCH_SIZE: int = 32
 
 # Tokenizer Constants
 PAD_TOKEN_ID: int = 0
+UNK_TOKEN_ID: int = 1
 SOS_TOKEN_ID: int = 2
 EOS_TOKEN_ID: int = 3
 
