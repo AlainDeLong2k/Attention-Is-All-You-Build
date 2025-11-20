@@ -1,13 +1,14 @@
 import torch
-from torch import Tensor
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from jaxtyping import Bool, Int
+from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
+from torchmetrics.text import BLEUScore, SacreBLEUScore
 from tqdm.auto import tqdm
+import config
 from src import model, utils
 
 
-TGT_VOCAB_SIZE: int = 32_000
+TGT_VOCAB_SIZE: int = config.VOCAB_SIZE
 
 
 def train_one_epoch(
@@ -76,9 +77,11 @@ def train_one_epoch(
 
         # 7. Update weights
         optimizer.step()
+
+        # 8. Update learning rate scheduler if used
         scheduler.step()
 
-        # 8. Update stats
+        # 9. Update stats
         total_loss += loss.item()
         progress_bar.set_postfix(loss=loss.item())
 
@@ -145,88 +148,115 @@ def validate_one_epoch(
     return total_loss / len(dataloader)
 
 
-def greedy_decode_sentence(
+def evaluate_model(
     model: model.Transformer,
-    src: Int[Tensor, "1 T_src"],  # Input: one sentence
-    src_mask: Bool[Tensor, "1 1 1 T_src"],
-    max_len: int,
-    sos_token_id: int,
-    eos_token_id: int,
+    dataloader: DataLoader,
+    tokenizer: PreTrainedTokenizerFast,
     device: torch.device,
-) -> Int[Tensor, "1 T_out"]:
+) -> tuple[float, float]:
     """
-    Performs greedy decoding for a single sentence.
-    This is an autoregressive process (token by token).
-
-    Args:
-        model: The trained Transformer model (already on device).
-        src: The source token IDs (e.g., English).
-        src_mask: The padding mask for the source.
-        max_len: The maximum length to generate.
-        sos_token_id: The ID for [SOS] token.
-        eos_token_id: The ID for [EOS] token.
-        device: The device to run on.
-
-    Returns:
-        Tensor: The generated target token IDs (e.g., Vietnamese).
+    Runs final evaluation on the test set using Beam Search
+    and calculates the SacreBLEU score.
     """
+    print("\n--- Starting Evaluation (BLEU + SacreBLEU) ---")
 
-    # Set model to eval mode (disables dropout)
+    # Set model to evaluation mode
+    # This disables dropout.
     model.eval()
 
-    # No gradients needed
+    all_predicted_strings = []
+    all_expected_strings = []
+
+    # --- No gradients needed ---
     with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Evaluating"):
 
-        # --- 1. Encode the source *once* ---
-        # (B, T_src) -> (B, T_src, D)
-        src_embedded = model.src_embed(src)
-        src_with_pos = model.pos_enc(src_embedded)
-        enc_output: Tensor = model.encoder(src_with_pos, src_mask)
+            batch_gpu = {
+                k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)
+            }
 
-        # --- 2. Initialize the Decoder input ---
-        # Start with the [SOS] token. Shape: (1, 1)
-        decoder_input: Tensor = torch.tensor(
-            [[sos_token_id]], dtype=torch.long, device=device
-        )  # Shape: (B=1, T_tgt=1)
+            src_ids = batch_gpu["src_ids"]
+            src_mask = batch_gpu["src_mask"]
+            expected_ids = batch_gpu["labels"]  # (B, T_tgt) [on GPU]
 
-        # --- 3. Autoregressive Loop ---
-        for _ in range(max_len - 1):  # (Max length - 1, since we have [SOS])
+            B = src_ids.size(0)
 
-            # --- a. Get Target Embedding + Position ---
-            # (B, T_tgt) -> (B, T_tgt, D)
-            tgt_embedded = model.tgt_embed(decoder_input)
-            tgt_with_pos = model.pos_enc(tgt_embedded)
+            # --- Handle 2D Expected IDs) ---
+            batch_expected_strings = []
 
-            # --- b. Create Target Mask (Causal) ---
-            # We must re-create the mask every loop,
-            # as T_tgt (decoder_input.size(1)) is growing.
-            # Shape: (1, 1, T_tgt, T_tgt)
-            T_tgt = decoder_input.size(1)
-            tgt_mask = utils.create_look_ahead_mask(T_tgt).to(device)
+            # Convert 2D GPU Tensor -> 2D CPU List
+            expected_id_lists = expected_ids.cpu().tolist()
 
-            # --- c. Run Decoder and Generator ---
-            # (B, T_tgt, D)
-            dec_output: Tensor = model.decoder(
-                tgt_with_pos, enc_output, src_mask, tgt_mask
-            )
-            # (B, T_tgt, vocab_size)
-            logits: Tensor = model.generator(dec_output)
+            # Now we iterate over the CPU list
+            for id_list in expected_id_lists:
+                # id_list is a 1D Python list (e.g., [70, 950, 7, 3])
+                # This call is now safe
+                token_list = tokenizer.convert_ids_to_tokens(id_list)
+                batch_expected_strings.append(
+                    utils.filter_and_detokenize(token_list, skip_special=True)
+                )
 
-            # --- d. Get the *last* token's logits ---
-            # (B, T_tgt, vocab_size) -> (B, vocab_size)
-            last_token_logits = logits[:, -1, :]
+            # --- Generate (decode) one sentence at a time ---
+            batch_predicted_strings = []
+            for i in tqdm(range(B), desc="Decoding Batch", leave=False):
+                src_sentence = src_ids[i].unsqueeze(0)
+                src_sentence_mask = src_mask[i].unsqueeze(0)
 
-            # --- e. Greedy Search (get highest prob. token) ---
-            # (B, vocab_size) -> (B, 1)
-            next_token: Tensor = torch.argmax(last_token_logits, dim=-1).unsqueeze(-1)
+                # (predicted_ids is 1D Tensor [T_out] on GPU)
+                predicted_ids = utils.greedy_decode_sentence(
+                    model,
+                    src_sentence,
+                    src_sentence_mask,
+                    max_len=config.MAX_SEQ_LEN,
+                    sos_token_id=config.SOS_TOKEN_ID,
+                    eos_token_id=config.EOS_TOKEN_ID,
+                    device=device,
+                )
 
-            # --- f. Append the new token ---
-            # (B, T_tgt) + (B, 1) -> (B, T_tgt + 1)
-            decoder_input = torch.cat([decoder_input, next_token], dim=1)
+                # Convert 1D GPU Tensor -> 1D CPU List
+                predicted_id_list = predicted_ids.cpu().tolist()
 
-            # --- g. Check for [EOS] ---
-            # If the *last* token we added is [EOS], stop generating.
-            if next_token.item() == eos_token_id:
-                break
+                # This call is now safe
+                predicted_token_list = tokenizer.convert_ids_to_tokens(
+                    predicted_id_list
+                )
 
-        return decoder_input.squeeze(0)  # Return shape (T_out)
+                decoded_str = utils.filter_and_detokenize(
+                    predicted_token_list, skip_special=True
+                )
+                batch_predicted_strings.append(decoded_str)
+
+            # --- Store strings for final metric calculation ---
+            all_predicted_strings.extend(batch_predicted_strings)
+            all_expected_strings.extend([[s] for s in batch_expected_strings])
+
+    bleu_metric = BLEUScore(n_gram=4, smooth=True).to(config.DEVICE)
+    sacrebleu_metric = SacreBLEUScore(
+        n_gram=4, smooth=True, tokenize="intl", lowercase=False
+    ).to(config.DEVICE)
+
+    # --- 5. Calculate final score ---
+    print("\nCalculating final BLEU score...")
+    final_bleu = bleu_metric(all_predicted_strings, all_expected_strings)
+
+    # print(f"\n========================================")
+    # print(f"🎉 FINAL BLEU SCORE (Evaluation Set): {final_bleu.item() * 100:.4f}%")
+    # print(f"========================================")
+
+    print("\nCalculating final SacreBLEU score...")
+    final_sacrebleu = sacrebleu_metric(all_predicted_strings, all_expected_strings)
+
+    # print(f"\n========================================")
+    # print(
+    #     f"🎉 FINAL SacreBLEU SCORE (Evaluation Set): {final_sacrebleu.item() * 100:.4f}%"
+    # )
+    # print(f"========================================")
+
+    # --- Show some examples ---
+    print("\n--- Translation Examples (Pred vs Exp) ---")
+    for i in range(min(5, len(all_predicted_strings))):
+        print(f"  PRED: {all_predicted_strings[i]}")
+        print(f"  EXP:  {all_expected_strings[i][0]}")
+        print("  ---")
+
+    return final_bleu.item() * 100, final_sacrebleu.item() * 100

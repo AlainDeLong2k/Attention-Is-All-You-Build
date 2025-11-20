@@ -29,22 +29,13 @@ def main():
     # tokenizer = None  # TODO
     tokenizer = utils.load_tokenizer(config.TOKENIZER_PATH)
 
-    # Load and clean datasets, return train/val/test splits
-    # cleaned_datasets = None  # TODO
-
     # Create DataLoader objects for training and validation
-    # train_loader = None  # TODO
-    # val_loader = None  # TODO
     # Test loader is usually used after training
     train_loader, val_loader, test_loader = dataset.get_dataloaders(tokenizer)
 
     # Step 3: Initialize model
-    # Set up model configuration with hyperparameters
-    # model_config = None  # TODO
-
     # Create Transformer model instance
     # Move model to selected device
-    # # TODO: transformer.to(device)
     print("Instantiating the Transformer model...")
     transformer_model = model.Transformer(
         src_vocab_size=tokenizer.vocab_size,
@@ -61,13 +52,8 @@ def main():
         f"Total model parameters: {sum(p.numel() for p in transformer_model.parameters() if p.requires_grad):,}"
     )
 
-    # Optionally compile model for performance (PyTorch 2.0+)
-    # if torch.__version__ >= "2.0":
-    #     transformer = torch.compile(transformer)
-
     # Step 4: Set up training components
     # Initialize optimizer (AdamW recommended for Transformer)
-    # optimizer = None  # TODO
     optimizer = AdamW(
         transformer_model.parameters(),
         lr=config.LEARNING_RATE,
@@ -76,12 +62,10 @@ def main():
         weight_decay=0.01,
     )
 
-    # # Define loss function (e.g., CrossEntropyLoss)
-    # criterion = None  # TODO
+    # Define loss function (e.g., CrossEntropyLoss)
     criterion = nn.CrossEntropyLoss(ignore_index=config.PAD_TOKEN_ID)
 
-    # # Optionally set up learning rate scheduler
-    # scheduler = None  # TODO
+    # Optionally set up learning rate scheduler
     num_training_steps = len(train_loader) * config.EPOCHS
     num_warmup_steps = int(0.1 * num_training_steps)
     # print(num_training_steps, num_warmup_steps)
@@ -92,10 +76,8 @@ def main():
         num_training_steps=num_training_steps,
     )
 
+    # Setup callbacks (Early Stopping)
     # Track best validation loss for checkpointing
-    # best_val_loss = float("inf")
-
-    # Setup callbacks
     early_stopper = callbacks.EarlyStopping(patience=5, min_delta=1e-4)
 
     # Create CUDA Event timers for accurate GPU profiling
@@ -103,7 +85,7 @@ def main():
         enable_timing=True
     )
 
-    # (Best Practice) Use tqdm for the outer epoch loop
+    # Use tqdm for the outer epoch loop
     epoch_progress_bar = tqdm(range(config.EPOCHS), desc="Total Epochs")
 
     # Step 5: Training loop
@@ -121,10 +103,10 @@ def main():
     val_loss_history = []
 
     for epoch in epoch_progress_bar:
-        # --- (Best Practice) Record start event ---
+        # --- Record start event ---
         starter.record()
 
-        # --- 1. Run Training ---
+        # --- Training phase ---
         avg_train_loss = engine.train_one_epoch(
             transformer_model,
             train_loader,
@@ -134,7 +116,7 @@ def main():
             config.DEVICE,
         )
 
-        # --- 2. Run Validation ---
+        # --- Validation phase ---
         avg_val_loss = engine.validate_one_epoch(
             transformer_model,
             val_loader,
@@ -142,15 +124,15 @@ def main():
             config.DEVICE,
         )
 
-        # --- (Best Practice) Record end event and synchronize ---
+        # --- Record end event and synchronize ---
         ender.record()
         torch.cuda.synchronize()  # (Wait for GPU to finish all tasks)
 
-        # (Best Practice) Get elapsed time from GPU events (in milliseconds)
+        # Get elapsed time from GPU events (in milliseconds)
         epoch_duration_ms = starter.elapsed_time(ender)
         epoch_duration = epoch_duration_ms / 1000.0  # Convert to seconds
 
-        # --- 3. (Best Practice) Log the results ---
+        # --- 3. Log the results ---
         train_loss_history.append(avg_train_loss)
         val_loss_history.append(avg_val_loss)
 
@@ -159,6 +141,7 @@ def main():
             train_loss=f"{avg_train_loss:.4f}", val_loss=f"{avg_val_loss:.4f}"
         )
 
+        # Log metrics and print results
         print(
             f"\n[EPOCH {epoch+1}/{config.EPOCHS}] "
             f"Time: {epoch_duration:.2f}s | "
@@ -169,43 +152,40 @@ def main():
         # Early stopping update
         early_stopper.step(avg_val_loss)
 
-        # Save best checkpoint
+        # Save model checkpoint if validation loss improves
         if avg_val_loss == early_stopper.best_loss:
             # torch.save(transformer_model.state_dict(), config.CHECKPOINT_PATH)
             save_model(transformer_model, filename=str(config.CHECKPOINT_PATH))
 
-        # If stopping
+        # Check early stopping condition
         if early_stopper.should_stop:
             print("Training stopped early.")
             break
 
     print("\n🎉 DRY RUN COMPLETE! 🎉")
 
-    # for epoch in range(config.EPOCHS):
-    #     # Training phase
-    #     train_loss = None  # TODO: Call engine.train_one_epoch
+    # --- STEP 6: Final Evaluation ---
 
-    #     # Validation phase
-    #     val_loss = None  # TODO: Call engine.validate_one_epoch
+    # 1. Load the BEST saved model weights
+    # (We don't want the last epoch's weights, we want the best validation weights)
+    print(f"Loading best checkpoint from: {config.CHECKPOINT_PATH}")
+    try:
+        load_model(transformer_model, filename=config.CHECKPOINT_PATH)
+    except Exception as e:
+        print(f"⚠️ Could not load checkpoint: {e}")
+        print("Using current model weights instead.")
 
-    #     # Update learning rate scheduler if used
-    #     # if scheduler: scheduler.step(val_loss)
+    # 2. Run Evaluation on TEST set
+    test_bleu, test_sacrebleu = engine.evaluate_model(
+        model=transformer_model,
+        dataloader=test_loader,
+        tokenizer=tokenizer,
+        device=config.DEVICE,
+    )
 
-    #     # Log metrics and print results
-    #     print(f"Epoch {epoch}: Train Loss {train_loss} | Val Loss {val_loss}")
-    #     # TODO: Log metrics to logger
-
-    #     # Save model checkpoint if validation loss improves
-    #     if val_loss is not None and val_loss < best_val_loss:
-    #         best_val_loss = val_loss
-    #         # TODO: torch.save(transformer.state_dict(), config.MODEL_SAVE_PATH)
-
-    #     # Check early stopping condition
-    #     # TODO: Implement early stopping logic
-
-    # # Step 6: Final evaluation (optional)
-    # print("Training Done. Starting Test Evaluation...")
-    # # TODO: Evaluate/test model on test set
+    print(
+        f"\n✅ Project Completed. Final Test BLEU: {test_bleu:.4f} | Final Test SacreBLEU: {test_sacrebleu:.4f}"
+    )
 
 
 if __name__ == "__main__":
@@ -220,3 +200,36 @@ if __name__ == "__main__":
     # )
 
     # train_loader, val_loader, test_loader = dataset.get_dataloaders(tokenizer)
+
+    # print(f"Loading best checkpoint from: {config.CHECKPOINT_PATH}")
+    # try:
+    #     print("Instantiating the Transformer model...")
+    #     transformer_model = model.Transformer(
+    #         src_vocab_size=tokenizer.vocab_size,
+    #         tgt_vocab_size=tokenizer.vocab_size,
+    #         d_model=config.D_MODEL,
+    #         n_heads=config.N_HEADS,
+    #         n_layers=config.N_LAYERS,
+    #         d_ff=config.D_FF,
+    #         dropout=config.DROPOUT,
+    #         max_seq_len=config.MAX_SEQ_LEN,
+    #     ).to(config.DEVICE)
+
+    #     # load_model(transformer_model, filename=config.CHECKPOINT_PATH)
+    #     transformer_model.load_state_dict(torch.load(config.MODEL_SAVE_PATH))
+
+    # except Exception as e:
+    #     print(f"⚠️ Could not load checkpoint: {e}")
+    #     print("Using current model weights instead.")
+
+    # # 2. Run Evaluation on TEST set
+    # test_bleu, test_sacrebleu = engine.evaluate_model(
+    #     model=transformer_model,
+    #     dataloader=test_loader,  # Use Test Loader here
+    #     tokenizer=tokenizer,
+    #     device=config.DEVICE,
+    # )
+
+    # print(
+    #     f"\n✅ Project Completed. Final Test BLEU: {test_bleu:.4f} | Final Test SacreBLEU: {test_sacrebleu:.4f}"
+    # )

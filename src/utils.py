@@ -1,11 +1,13 @@
 from pathlib import Path
 import random
+import re
 import numpy as np
 from datasets import DatasetDict, Dataset, load_dataset
 import torch
 from torch import Tensor
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from jaxtyping import Bool, Int
+from src import model
 
 
 # Utility function to set random seed for reproducibility
@@ -170,3 +172,113 @@ def create_look_ahead_mask(seq_len: int) -> Bool[Tensor, "1 1 T_q T_q"]:
     # Shape: (T_q, T_q) -> (1, 1, T_q, T_q)
     # (mask == 1) converts 1. to True, 0. to False
     return (lower_triangular == 1).unsqueeze(0).unsqueeze(0)
+
+
+def greedy_decode_sentence(
+    model: model.Transformer,
+    src: Int[Tensor, "1 T_src"],  # Input: one sentence
+    src_mask: Bool[Tensor, "1 1 1 T_src"],
+    max_len: int,
+    sos_token_id: int,
+    eos_token_id: int,
+    device: torch.device,
+) -> Int[Tensor, "1 T_out"]:
+    """
+    Performs greedy decoding for a single sentence.
+    This is an autoregressive process (token by token).
+
+    Args:
+        model: The trained Transformer model (already on device).
+        src: The source token IDs (e.g., English).
+        src_mask: The padding mask for the source.
+        max_len: The maximum length to generate.
+        sos_token_id: The ID for [SOS] token.
+        eos_token_id: The ID for [EOS] token.
+        device: The device to run on.
+
+    Returns:
+        Tensor: The generated target token IDs (e.g., Vietnamese).
+    """
+
+    # Set model to eval mode (disables dropout)
+    model.eval()
+
+    # No gradients needed
+    with torch.no_grad():
+
+        # --- 1. Encode the source *once* ---
+        # (B, T_src) -> (B, T_src, D)
+        src_embedded = model.src_embed(src)
+        src_with_pos = model.pos_enc(src_embedded)
+        enc_output: Tensor = model.encoder(src_with_pos, src_mask)
+
+        # --- 2. Initialize the Decoder input ---
+        # Start with the [SOS] token. Shape: (1, 1)
+        decoder_input: Tensor = torch.tensor(
+            [[sos_token_id]], dtype=torch.long, device=device
+        )  # Shape: (B=1, T_tgt=1)
+
+        # --- 3. Autoregressive Loop ---
+        for _ in range(max_len - 1):  # (Max length - 1, since we have [SOS])
+
+            # --- a. Get Target Embedding + Position ---
+            # (B, T_tgt) -> (B, T_tgt, D)
+            tgt_embedded = model.tgt_embed(decoder_input)
+            tgt_with_pos = model.pos_enc(tgt_embedded)
+
+            # --- b. Create Target Mask (Causal) ---
+            # We must re-create the mask every loop,
+            # as T_tgt (decoder_input.size(1)) is growing.
+            # Shape: (1, 1, T_tgt, T_tgt)
+            T_tgt = decoder_input.size(1)
+            tgt_mask = create_look_ahead_mask(T_tgt).to(device)
+
+            # --- c. Run Decoder and Generator ---
+            # (B, T_tgt, D)
+            dec_output: Tensor = model.decoder(
+                tgt_with_pos, enc_output, src_mask, tgt_mask
+            )
+            # (B, T_tgt, vocab_size)
+            logits: Tensor = model.generator(dec_output)
+
+            # --- d. Get the *last* token's logits ---
+            # (B, T_tgt, vocab_size) -> (B, vocab_size)
+            last_token_logits = logits[:, -1, :]
+
+            # --- e. Greedy Search (get highest prob. token) ---
+            # (B, vocab_size) -> (B, 1)
+            next_token: Tensor = torch.argmax(last_token_logits, dim=-1).unsqueeze(-1)
+
+            # --- f. Append the new token ---
+            # (B, T_tgt) + (B, 1) -> (B, T_tgt + 1)
+            decoder_input = torch.cat([decoder_input, next_token], dim=1)
+
+            # --- g. Check for [EOS] ---
+            # If the *last* token we added is [EOS], stop generating.
+            if next_token.item() == eos_token_id:
+                break
+
+        return decoder_input.squeeze(0)  # Return shape (T_out)
+
+
+def filter_and_detokenize(token_list: list[str], skip_special: bool = True) -> str:
+    """
+    Manually joins tokens with a space and cleans up common
+    punctuation issues caused by whitespace tokenization.
+    """
+    if skip_special:
+        # 1. Filter out special tokens
+        special_tokens = {"[PAD]", "[UNK]", "[SOS]", "[EOS]"}
+        token_list = [tok for tok in token_list if tok not in special_tokens]
+
+    # 2. Join with spaces
+    detokenized_string = " ".join(token_list)
+
+    # 3. Clean up punctuation
+    # (This is a simple heuristic-based detokenizer)
+    # Remove space before punctuation: "project ." -> "project."
+    detokenized_string = re.sub(r'\s([.,!?\'":;])', r"\1", detokenized_string)
+    # Handle contractions: "don 't" -> "don't"
+    detokenized_string = re.sub(r"(\w)\s(\'\w)", r"\1\2", detokenized_string)
+
+    return detokenized_string
