@@ -1,15 +1,17 @@
 import torch
+from torch import Tensor
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from jaxtyping import Bool, Int
 from tqdm.auto import tqdm
-from src.model import Transformer
+from src import model, utils
 
 
 TGT_VOCAB_SIZE: int = 32_000
 
 
 def train_one_epoch(
-    model: Transformer,
+    model: model.Transformer,
     dataloader: DataLoader,
     optimizer: torch.optim.Optimizer,
     criterion: nn.Module,
@@ -85,7 +87,7 @@ def train_one_epoch(
 
 
 def validate_one_epoch(
-    model: Transformer,
+    model: model.Transformer,
     dataloader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
@@ -141,3 +143,90 @@ def validate_one_epoch(
 
     # Return average loss for the epoch
     return total_loss / len(dataloader)
+
+
+def greedy_decode_sentence(
+    model: model.Transformer,
+    src: Int[Tensor, "1 T_src"],  # Input: one sentence
+    src_mask: Bool[Tensor, "1 1 1 T_src"],
+    max_len: int,
+    sos_token_id: int,
+    eos_token_id: int,
+    device: torch.device,
+) -> Int[Tensor, "1 T_out"]:
+    """
+    Performs greedy decoding for a single sentence.
+    This is an autoregressive process (token by token).
+
+    Args:
+        model: The trained Transformer model (already on device).
+        src: The source token IDs (e.g., English).
+        src_mask: The padding mask for the source.
+        max_len: The maximum length to generate.
+        sos_token_id: The ID for [SOS] token.
+        eos_token_id: The ID for [EOS] token.
+        device: The device to run on.
+
+    Returns:
+        Tensor: The generated target token IDs (e.g., Vietnamese).
+    """
+
+    # Set model to eval mode (disables dropout)
+    model.eval()
+
+    # No gradients needed
+    with torch.no_grad():
+
+        # --- 1. Encode the source *once* ---
+        # (B, T_src) -> (B, T_src, D)
+        src_embedded = model.src_embed(src)
+        src_with_pos = model.pos_enc(src_embedded)
+        enc_output: Tensor = model.encoder(src_with_pos, src_mask)
+
+        # --- 2. Initialize the Decoder input ---
+        # Start with the [SOS] token. Shape: (1, 1)
+        decoder_input: Tensor = torch.tensor(
+            [[sos_token_id]], dtype=torch.long, device=device
+        )  # Shape: (B=1, T_tgt=1)
+
+        # --- 3. Autoregressive Loop ---
+        for _ in range(max_len - 1):  # (Max length - 1, since we have [SOS])
+
+            # --- a. Get Target Embedding + Position ---
+            # (B, T_tgt) -> (B, T_tgt, D)
+            tgt_embedded = model.tgt_embed(decoder_input)
+            tgt_with_pos = model.pos_enc(tgt_embedded)
+
+            # --- b. Create Target Mask (Causal) ---
+            # We must re-create the mask every loop,
+            # as T_tgt (decoder_input.size(1)) is growing.
+            # Shape: (1, 1, T_tgt, T_tgt)
+            T_tgt = decoder_input.size(1)
+            tgt_mask = utils.create_look_ahead_mask(T_tgt).to(device)
+
+            # --- c. Run Decoder and Generator ---
+            # (B, T_tgt, D)
+            dec_output: Tensor = model.decoder(
+                tgt_with_pos, enc_output, src_mask, tgt_mask
+            )
+            # (B, T_tgt, vocab_size)
+            logits: Tensor = model.generator(dec_output)
+
+            # --- d. Get the *last* token's logits ---
+            # (B, T_tgt, vocab_size) -> (B, vocab_size)
+            last_token_logits = logits[:, -1, :]
+
+            # --- e. Greedy Search (get highest prob. token) ---
+            # (B, vocab_size) -> (B, 1)
+            next_token: Tensor = torch.argmax(last_token_logits, dim=-1).unsqueeze(-1)
+
+            # --- f. Append the new token ---
+            # (B, T_tgt) + (B, 1) -> (B, T_tgt + 1)
+            decoder_input = torch.cat([decoder_input, next_token], dim=1)
+
+            # --- g. Check for [EOS] ---
+            # If the *last* token we added is [EOS], stop generating.
+            if next_token.item() == eos_token_id:
+                break
+
+        return decoder_input.squeeze(0)  # Return shape (T_out)
