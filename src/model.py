@@ -1,5 +1,7 @@
+import torch
 from torch import Tensor
 import torch.nn as nn
+from safetensors.torch import load_model
 from jaxtyping import Bool, Int, Float
 from src.embedding import InputEmbeddings, PositionalEncoding
 from src.modules import Encoder, Decoder
@@ -173,3 +175,24 @@ class Transformer(nn.Module):
         logits: Tensor = self.generator(dec_output)
 
         return logits
+
+
+def load_trained_model(
+    config_obj, checkpoint_path, device: torch.device
+) -> Transformer:
+    print("Instantiating the Transformer model...")
+    model = Transformer(
+        src_vocab_size=config_obj.VOCAB_SIZE,
+        tgt_vocab_size=config_obj.VOCAB_SIZE,
+        d_model=config_obj.D_MODEL,
+        n_heads=config_obj.N_HEADS,
+        n_layers=config_obj.N_LAYERS,
+        d_ff=config_obj.D_FF,
+        dropout=config_obj.DROPOUT,
+        max_seq_len=config_obj.MAX_SEQ_LEN,
+    ).to(device)
+
+    print(f"Loading model from: {checkpoint_path}")
+    load_model(model, filename=checkpoint_path)
+
+    return model

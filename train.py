@@ -1,13 +1,13 @@
+import time
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from transformers.optimization import get_linear_schedule_with_warmup
+import wandb
 from tqdm.auto import tqdm
-from safetensors.torch import save_model, load_model
+from safetensors.torch import save_model
 import config
 from src import dataset, model, engine, callbacks, utils
-
-# Import các thư viện tracking (WandB/Tensorboard) nếu dùng
 
 
 def main():
@@ -18,11 +18,19 @@ def main():
     # Step 1: Set random seed for reproducibility
     utils.seed_everything(seed=42)
 
-    # Select device (CPU or GPU)
-    device = config.DEVICE
-
     # Initialize logger (WandB, TensorBoard, or standard logging)
     # TODO: Set up logger for experiment tracking
+    config_dict = {
+        k: v for k, v in vars(config).items() if k.isupper() and not k.startswith("_")
+    }
+
+    run = wandb.init(
+        entity="alaindelong-hcmut",
+        project="Attention Is All You Build",
+        name=utils.make_run_name("transformer_en_vi_iwslt", config.D_MODEL),
+        config=config_dict,
+        job_type="train",
+    )
 
     # Step 2: Prepare data
     # Load tokenizer from file or create a new one
@@ -63,7 +71,9 @@ def main():
     )
 
     # Define loss function (e.g., CrossEntropyLoss)
-    criterion = nn.CrossEntropyLoss(ignore_index=config.PAD_TOKEN_ID)
+    criterion = nn.CrossEntropyLoss(
+        ignore_index=config.PAD_TOKEN_ID, label_smoothing=0.1
+    ).to(config.DEVICE)
 
     # Optionally set up learning rate scheduler
     num_training_steps = len(train_loader) * config.EPOCHS
@@ -81,9 +91,7 @@ def main():
     early_stopper = callbacks.EarlyStopping(patience=5, min_delta=1e-4)
 
     # Create CUDA Event timers for accurate GPU profiling
-    starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(
-        enable_timing=True
-    )
+    # starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
 
     # Use tqdm for the outer epoch loop
     epoch_progress_bar = tqdm(range(config.EPOCHS), desc="Total Epochs")
@@ -104,7 +112,8 @@ def main():
 
     for epoch in epoch_progress_bar:
         # --- Record start event ---
-        starter.record()
+        # starter.record()
+        start = time.perf_counter()
 
         # --- Training phase ---
         avg_train_loss = engine.train_one_epoch(
@@ -114,6 +123,7 @@ def main():
             criterion,
             scheduler,
             config.DEVICE,
+            run,
         )
 
         # --- Validation phase ---
@@ -125,12 +135,14 @@ def main():
         )
 
         # --- Record end event and synchronize ---
-        ender.record()
+        # ender.record()
+        end = time.perf_counter()
         torch.cuda.synchronize()  # (Wait for GPU to finish all tasks)
 
         # Get elapsed time from GPU events (in milliseconds)
-        epoch_duration_ms = starter.elapsed_time(ender)
-        epoch_duration = epoch_duration_ms / 1000.0  # Convert to seconds
+        # epoch_duration_ms = starter.elapsed_time(ender)
+        # epoch_duration = epoch_duration_ms / 1000.0  # Convert to seconds
+        epoch_duration = end - start
 
         # --- 3. Log the results ---
         train_loss_history.append(avg_train_loss)
@@ -142,6 +154,10 @@ def main():
         )
 
         # Log metrics and print results
+        run.log(
+            {"epoch": epoch + 1, "train/loss": avg_train_loss, "val/loss": avg_val_loss}
+        )
+
         print(
             f"\n[EPOCH {epoch+1}/{config.EPOCHS}] "
             f"Time: {epoch_duration:.2f}s | "
@@ -168,12 +184,17 @@ def main():
 
     # 1. Load the BEST saved model weights
     # (We don't want the last epoch's weights, we want the best validation weights)
-    print(f"Loading best checkpoint from: {config.CHECKPOINT_PATH}")
     try:
-        load_model(transformer_model, filename=config.CHECKPOINT_PATH)
+        transformer_model = model.load_trained_model(
+            config, config.CHECKPOINT_PATH, config.DEVICE
+        )
+
     except Exception as e:
         print(f"⚠️ Could not load checkpoint: {e}")
         print("Using current model weights instead.")
+
+    columns = ["Target", "Prediction"]
+    translation_table = wandb.Table(columns=columns)
 
     # 2. Run Evaluation on TEST set
     test_bleu, test_sacrebleu = engine.evaluate_model(
@@ -181,11 +202,24 @@ def main():
         dataloader=test_loader,
         tokenizer=tokenizer,
         device=config.DEVICE,
+        table=translation_table,
     )
 
     print(
-        f"\n✅ Project Completed. Final Test BLEU: {test_bleu:.4f} | Final Test SacreBLEU: {test_sacrebleu:.4f}"
+        f"\n✅ Project Completed. Final Test BLEU Score: {test_bleu:.4f}% | Final Test SacreBLEU Score: {test_sacrebleu:.4f}%"
     )
+
+    run.log(
+        {
+            "test/bleu": test_bleu,
+            "test/sacre_bleu": test_sacrebleu,
+            "test/translations": translation_table,
+        }
+    )
+
+    save_model(transformer_model, filename=str(config.MODEL_SAVE_PATH))
+
+    run.finish()
 
 
 if __name__ == "__main__":
@@ -201,26 +235,9 @@ if __name__ == "__main__":
 
     # train_loader, val_loader, test_loader = dataset.get_dataloaders(tokenizer)
 
-    # print(f"Loading best checkpoint from: {config.CHECKPOINT_PATH}")
-    # try:
-    #     print("Instantiating the Transformer model...")
-    #     transformer_model = model.Transformer(
-    #         src_vocab_size=tokenizer.vocab_size,
-    #         tgt_vocab_size=tokenizer.vocab_size,
-    #         d_model=config.D_MODEL,
-    #         n_heads=config.N_HEADS,
-    #         n_layers=config.N_LAYERS,
-    #         d_ff=config.D_FF,
-    #         dropout=config.DROPOUT,
-    #         max_seq_len=config.MAX_SEQ_LEN,
-    #     ).to(config.DEVICE)
-
-    #     # load_model(transformer_model, filename=config.CHECKPOINT_PATH)
-    #     transformer_model.load_state_dict(torch.load(config.MODEL_SAVE_PATH))
-
-    # except Exception as e:
-    #     print(f"⚠️ Could not load checkpoint: {e}")
-    #     print("Using current model weights instead.")
+    # transformer_model = model.load_trained_model(
+    #     config, config.MODEL_SAVE_PATH, config.DEVICE
+    # )
 
     # # 2. Run Evaluation on TEST set
     # test_bleu, test_sacrebleu = engine.evaluate_model(
@@ -233,3 +250,13 @@ if __name__ == "__main__":
     # print(
     #     f"\n✅ Project Completed. Final Test BLEU: {test_bleu:.4f} | Final Test SacreBLEU: {test_sacrebleu:.4f}"
     # )
+
+    # config_dict = {
+    #     k: v for k, v in vars(config).items() if k.isupper() and not k.startswith("_")
+    # }
+
+    # run = wandb.init(
+    #     entity="alaindelong-hcmut", project="Demo", config=config_dict, job_type="train"
+    # )
+
+    # run.finish()

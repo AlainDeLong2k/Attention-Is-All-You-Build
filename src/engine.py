@@ -18,6 +18,7 @@ def train_one_epoch(
     criterion: nn.Module,
     scheduler: torch.optim.lr_scheduler.LambdaLR,
     device: torch.device,
+    logger=None,
 ) -> float:
     """
     Runs a single training epoch.
@@ -41,8 +42,11 @@ def train_one_epoch(
 
     # Use tqdm for a progress bar
     progress_bar = tqdm(dataloader, desc="Training", leave=False)
+    batch_idx: int = 0
 
     for batch in progress_bar:
+        batch_idx += 1
+
         # 1. Move batch to device (GPU)
         # We define a helper for this
         batch_gpu = {
@@ -84,6 +88,15 @@ def train_one_epoch(
         # 9. Update stats
         total_loss += loss.item()
         progress_bar.set_postfix(loss=loss.item())
+
+        # 10. Log metrics
+        if logger and batch_idx % 100 == 0:
+            logger.log(
+                {
+                    "train/batch_loss": loss.item(),
+                    "train/learning_rate": optimizer.param_groups[0]["lr"],
+                }
+            )
 
     # Return average loss for the epoch
     return total_loss / len(dataloader)
@@ -153,6 +166,7 @@ def evaluate_model(
     dataloader: DataLoader,
     tokenizer: PreTrainedTokenizerFast,
     device: torch.device,
+    table=None,
 ) -> tuple[float, float]:
     """
     Runs final evaluation on the test set using Beam Search
@@ -258,5 +272,7 @@ def evaluate_model(
         print(f"  PRED: {all_predicted_strings[i]}")
         print(f"  EXP:  {all_expected_strings[i][0]}")
         print("  ---")
+
+        table.add_data(all_expected_strings[i][0], all_predicted_strings[i])
 
     return final_bleu.item() * 100, final_sacrebleu.item() * 100

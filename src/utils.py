@@ -1,6 +1,7 @@
 from pathlib import Path
 import random
 import re
+from datetime import datetime
 import numpy as np
 from datasets import DatasetDict, Dataset, load_dataset
 import torch
@@ -24,6 +25,11 @@ def seed_everything(seed: int = 42) -> None:
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def make_run_name(model_name: str, d_model: int) -> str:
+    time_tag: str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{model_name}-{d_model}d-{time_tag}"
 
 
 # --- Helper functions for cleaning ---
@@ -282,3 +288,86 @@ def filter_and_detokenize(token_list: list[str], skip_special: bool = True) -> s
     detokenized_string = re.sub(r"(\w)\s(\'\w)", r"\1\2", detokenized_string)
 
     return detokenized_string
+
+
+# Define a high-level, production-ready
+# inference function that handles all steps.
+def translate(
+    model: model.Transformer,
+    tokenizer: PreTrainedTokenizerFast,
+    sentence_en: str,
+    device: torch.device,
+    max_len: int,
+    sos_token_id: int,
+    eos_token_id: int,
+    pad_token_id: int,
+) -> str:
+    """
+    Translates a single English sentence to Vietnamese.
+
+    Args:
+        model: The trained Transformer model.
+        tokenizer: The (PreTrainedTokenizerFast) tokenizer.
+        sentence_en: The raw English input string.
+        device: The device to run on.
+        max_len: The max sequence length (from config).
+        sos_token_id: The ID for [SOS].
+        eos_token_id: The ID for [EOS].
+        pad_token_id: The ID for [PAD].
+
+    Returns:
+        str: The translated Vietnamese string.
+    """
+
+    # Set model to evaluation mode
+    model.eval()
+
+    # Run inference in a no-gradient context
+    with torch.no_grad():
+
+        # 1. Tokenize the source (English) sentence
+        src_encoding = tokenizer(
+            sentence_en,
+            truncation=True,
+            max_length=max_len,
+            add_special_tokens=False,  # (Encoder does not need SOS/EOS)
+        )
+
+        # 2. Convert to Tensor, add Batch dimension (B=1), and move to device
+        # Shape: (1, T_src)
+        src_ids: Tensor = torch.tensor(
+            [src_encoding["input_ids"]], dtype=torch.long
+        ).to(device)
+
+        # 3. Create the source padding mask
+        # Shape: (1, 1, 1, T_src)
+        src_mask: Tensor = create_padding_mask(src_ids, pad_token_id).to(device)
+
+        # 4. Generate the target (Vietnamese) token IDs
+        # (This calls the autoregressive function from Cell 16A)
+        # Shape: (T_out)
+        predicted_ids: Tensor = greedy_decode_sentence(
+            model,
+            src_ids,
+            src_mask,
+            max_len=max_len,
+            sos_token_id=sos_token_id,
+            eos_token_id=eos_token_id,
+            device=device,
+        )
+
+        # 5. Detokenize (Fixing "sticky" words)
+
+        # Convert 1D GPU Tensor -> 1D CPU List
+        predicted_id_list = predicted_ids.cpu().tolist()
+
+        # This call is safe (1D List -> List[str])
+        predicted_token_list = tokenizer.convert_ids_to_tokens(predicted_id_list)
+
+        # Use our helper (from Cell 16B) to
+        # join with spaces, remove special tokens, and fix punctuation.
+        result_string = filter_and_detokenize(predicted_token_list, skip_special=True)
+
+        return result_string
+
+    print("Inference function `translate()` defined.")
