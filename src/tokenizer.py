@@ -9,6 +9,7 @@ from tokenizers import (
     trainers,
 )
 from tqdm.auto import tqdm
+import wandb
 from utils import get_raw_data
 
 
@@ -129,3 +130,27 @@ if __name__ == "__main__":
     # tokenizer.save(str(TOKENIZER_SAVE_PATH))
 
     train_tokenizer()
+
+    run = wandb.init(
+        entity="alaindelong-hcmut",
+        project="Attention Is All You Build",
+        job_type="tokenizer-train",
+    )
+
+    # Log tokenizer
+    tokenizer_artifact = wandb.Artifact(
+        name="iwslt_en-vi_tokenizer",
+        type="tokenizer",
+        description="BPE Tokenizer trained on IWSLT 15 (133k+ pairs en-vi)",
+        metadata={
+            "vocab_size": 32000,
+            "algorithm": "BPE",
+            "framework": "huggingface",
+            "training_data": "iwslt-15-en-vi-133k",
+            "lower_case": False,
+        },
+    )
+    tokenizer_artifact.add_file(local_path=str(TOKENIZER_SAVE_PATH))
+    run.log_artifact(tokenizer_artifact, aliases=["baseline"])
+
+    run.finish()

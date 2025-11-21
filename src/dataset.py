@@ -252,7 +252,7 @@ def get_dataloaders(
     # (Shuffle = False for reproducible validation)
     val_loader = DataLoader(
         val_ds,
-        batch_size=4 * config.BATCH_SIZE,
+        batch_size=2 * config.BATCH_SIZE,
         shuffle=False,
         num_workers=config.NUM_WORKERS,
         collate_fn=collator,
@@ -264,7 +264,7 @@ def get_dataloaders(
     # 5. Create Test DataLoader
     test_loader = DataLoader(
         test_ds,
-        batch_size=4 * config.BATCH_SIZE,
+        batch_size=2 * config.BATCH_SIZE,
         shuffle=False,
         num_workers=2,
         # num_workers=config.NUM_WORKERS,

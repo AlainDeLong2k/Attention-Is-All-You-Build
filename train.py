@@ -219,6 +219,13 @@ def main():
 
     save_model(transformer_model, filename=str(config.MODEL_SAVE_PATH))
 
+    # Log model
+    model_artifact = wandb.Artifact(name="transformer_en_vi_iwslt", type="model")
+    model_artifact.add_file(
+        local_path=str(config.MODEL_SAVE_PATH), name=config.MODEL_NAME
+    )
+    run.log_artifact(model_artifact, aliases=["best", f"{config.D_MODEL}d"])
+
     run.finish()
 
 
@@ -256,7 +263,24 @@ if __name__ == "__main__":
     # }
 
     # run = wandb.init(
-    #     entity="alaindelong-hcmut", project="Demo", config=config_dict, job_type="train"
+    #     entity="alaindelong-hcmut",
+    #     project="Attention Is All You Build",
+    #     config=config_dict,
+    #     job_type="train",
     # )
+
+    # # Log model
+    # model_artifact = wandb.Artifact(name="transformer_en_vi_iwslt", type="model")
+    # model_artifact.add_file(
+    #     local_path=str(config.MODEL_SAVE_PATH), name=config.MODEL_NAME
+    # )
+    # run.log_artifact(model_artifact, aliases=["best", f"{config.D_MODEL}d"])
+
+    # # Log tokenizer
+    # tokenizer_artifact = wandb.Artifact(
+    #     name="iwslt_en-vi_tokenizer_32k", type="tokenizer"
+    # )
+    # tokenizer_artifact.add_file(local_path=str(config.TOKENIZER_PATH))
+    # run.log_artifact(tokenizer_artifact, aliases=["latest"])
 
     # run.finish()
