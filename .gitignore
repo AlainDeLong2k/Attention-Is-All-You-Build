@@ -218,3 +218,6 @@ mlruns/
 # Temp Files
 scratch/
 notebooks/
+
+# Weights & Biases
+wandb/

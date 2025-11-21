@@ -244,6 +244,7 @@ def get_dataloaders(
         num_workers=config.NUM_WORKERS,
         collate_fn=collator,
         pin_memory=True if config.DEVICE == "cuda" else False,  # (Optimization)
+        prefetch_factor=2,
         persistent_workers=True,
     )
 
@@ -256,6 +257,7 @@ def get_dataloaders(
         num_workers=config.NUM_WORKERS,
         collate_fn=collator,
         pin_memory=True if config.DEVICE == "cuda" else False,
+        prefetch_factor=2,
         persistent_workers=True,
     )
 
@@ -264,9 +266,11 @@ def get_dataloaders(
         test_ds,
         batch_size=4 * config.BATCH_SIZE,
         shuffle=False,
-        num_workers=config.NUM_WORKERS,
+        num_workers=2,
+        # num_workers=config.NUM_WORKERS,
         collate_fn=collator,
         pin_memory=True if config.DEVICE == "cuda" else False,
+        prefetch_factor=2,
     )
 
     print(f"DataLoader (train) created with {len(train_loader)} batches.")
