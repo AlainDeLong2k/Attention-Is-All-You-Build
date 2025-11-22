@@ -15,8 +15,8 @@ MODEL_DIR = Path(r"artifacts\models")
 # MODEL_NAME = "transformer_en_vi_iwslt_1.pt"
 MODEL_NAME = "transformer_en_vi_iwslt_1.safetensors"
 
-MODEL_SAVE_PATH = MODEL_DIR / MODEL_NAME
-# MODEL_SAVE_PATH = MODEL_DIR / "transformer_en_vi_iwslt_kaggle_1.safetensors"
+# MODEL_SAVE_PATH = MODEL_DIR / MODEL_NAME
+MODEL_SAVE_PATH = MODEL_DIR / "transformer_en_vi_iwslt_kaggle_1.safetensors"
 # MODEL_SAVE_PATH = Path(r"notebooks\models") / MODEL_NAME
 
 CHECKPOINT_PATH = Path(r"artifacts\checkpoints") / MODEL_NAME
