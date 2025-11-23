@@ -46,8 +46,8 @@ Unlike typical tutorials, this repository demonstrates how to build a **producti
 
 This project evaluates the model on two different scales of English-Vietnamese data to test both model generalization and pipeline robustness:
 
-* **CCMatrix (Scale Stress-Test):** A subset of **1M pairs** filtered from the massive 12M+ corpus. This was used primarily to test the pipeline's capability to handle large-scale data ingestion and dynamic batching.
-* **IWSLT'15 (Standard Benchmark):** ~133k sentence pairs. A high-quality, pre-split dataset used for reliable benchmarking.
+* **[CCMatrix](https://opus.nlpl.eu/CCMatrix/en&vi/v1/CCMatrix) (Scale Stress-Test):** A subset of **1M pairs** filtered from the massive 12M+ corpus. This was used primarily to test the pipeline's capability to handle large-scale data ingestion and dynamic batching.
+* **[IWSLT'15](https://huggingface.co/datasets/IWSLT/mt_eng_vietnamese) (Standard Benchmark):** ~133k sentence pairs. A high-quality, pre-split dataset used for reliable benchmarking.
 
 ### 2. Quantitative Results
 
