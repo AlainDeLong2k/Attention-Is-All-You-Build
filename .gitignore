@@ -221,6 +221,7 @@ mlruns/
 # Temp Files
 scratch/
 notebooks/
+test_push_to_hub.ipynb
 
 # Weights & Biases
 wandb/
